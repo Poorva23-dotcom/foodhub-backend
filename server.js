@@ -6,6 +6,11 @@ const { sendOrderConfirmation } = require('./config/email');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
+console.log('=== SERVER STARTING ===');
+console.log('Node version:', process.version);
+console.log('MONGO_URI exists:', !!process.env.MONGO_URI);
+console.log('PORT from env:', process.env.PORT);
+
 const app = express();
 
 // Middleware
@@ -471,23 +476,32 @@ app.post('/api/verify-payment', async (req, res) => {
 // ============ CONNECT TO MONGODB ============
 
 const startServer = async () => {
+    console.log('Attempting to connect to MongoDB...');
+    
+    if (!process.env.MONGO_URI) {
+        console.error('❌ MONGO_URI environment variable is not set!');
+        console.log('Available env vars:', Object.keys(process.env));
+        process.exit(1);
+    }
+    
+    console.log('MONGO_URI starts with:', process.env.MONGO_URI.substring(0, 50) + '...');
+    
     try {
-        if (!process.env.MONGO_URI) {
-            console.error('❌ MONGO_URI is not defined in environment variables');
-            process.exit(1);
-        }
-        
-        await mongoose.connect(process.env.MONGO_URI);
+        await mongoose.connect(process.env.MONGO_URI, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
         console.log('✅ MongoDB Connected Successfully!');
         console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
         
         const PORT = process.env.PORT || 5000;
-        app.listen(PORT, () => {
+        app.listen(PORT, '0.0.0.0', () => {
             console.log(`\n🚀 Server running on http://localhost:${PORT}`);
             console.log(`📋 Environment: ${process.env.NODE_ENV || 'development'}`);
         });
     } catch (err) {
         console.error('❌ MongoDB Connection Error:', err.message);
+        console.error('Full error:', err);
         process.exit(1);
     }
 };
