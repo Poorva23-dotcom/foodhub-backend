@@ -365,10 +365,7 @@ app.delete('/api/products/:id', async (req, res) => {
 });
 
 // ============ RAZORPAY PAYMENT ROUTES ============
-// ============ RAZORPAY PAYMENT ROUTES ============
 
-
-// Check if Razorpay keys are configured
 let razorpayInstance = null;
 try {
     if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
@@ -399,7 +396,6 @@ app.post('/api/create-order', async (req, res) => {
             });
         }
         
-        // If Razorpay is not configured, return mock order (for testing without Razorpay)
         if (!razorpayInstance) {
             console.log('Using mock order (Razorpay not configured)');
             return res.json({
@@ -445,7 +441,6 @@ app.post('/api/verify-payment', async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
         
-        // For mock payments (when Razorpay not configured)
         if (razorpay_order_id && razorpay_order_id.startsWith('mock_order_')) {
             console.log('Mock payment verified');
             return res.json({ success: true, message: 'Mock payment verified' });
@@ -472,18 +467,29 @@ app.post('/api/verify-payment', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
 // ============ CONNECT TO MONGODB ============
 
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => {
+const startServer = async () => {
+    try {
+        if (!process.env.MONGO_URI) {
+            console.error('❌ MONGO_URI is not defined in environment variables');
+            process.exit(1);
+        }
+        
+        await mongoose.connect(process.env.MONGO_URI);
         console.log('✅ MongoDB Connected Successfully!');
         console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
         
         const PORT = process.env.PORT || 5000;
         app.listen(PORT, () => {
             console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+            console.log(`📋 Environment: ${process.env.NODE_ENV || 'development'}`);
         });
-    })
-    .catch(err => {
-        console.error('❌ MongoDB Error:', err.message);
-    });
+    } catch (err) {
+        console.error('❌ MongoDB Connection Error:', err.message);
+        process.exit(1);
+    }
+};
+
+startServer();
