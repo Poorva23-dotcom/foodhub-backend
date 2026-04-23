@@ -17,6 +17,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ============ HEALTH CHECK ROUTE (For Render) ============
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // ============ ALL API ROUTES ============
 
 // Test route
@@ -378,9 +383,9 @@ try {
             key_id: process.env.RAZORPAY_KEY_ID,
             key_secret: process.env.RAZORPAY_KEY_SECRET
         });
-        console.log('✅ Razorpay initialized with test keys');
+        console.log('✅ Razorpay initialized');
     } else {
-        console.log('⚠️ Razorpay keys not found. Payment will use mock mode.');
+        console.log('⚠️ Razorpay keys not found');
     }
 } catch (error) {
     console.log('⚠️ Razorpay initialization failed:', error.message);
@@ -389,20 +394,15 @@ try {
 // Create Razorpay Order
 app.post('/api/create-order', async (req, res) => {
     console.log('=== CREATE ORDER API CALLED ===');
-    console.log('Request body:', req.body);
     
     try {
         const { amount } = req.body;
         
         if (!amount) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Amount is required' 
-            });
+            return res.status(400).json({ success: false, error: 'Amount is required' });
         }
         
         if (!razorpayInstance) {
-            console.log('Using mock order (Razorpay not configured)');
             return res.json({
                 success: true,
                 orderId: 'mock_order_' + Date.now(),
@@ -421,8 +421,6 @@ app.post('/api/create-order', async (req, res) => {
         
         const order = await razorpayInstance.orders.create(options);
         
-        console.log('Razorpay Order Created:', order.id);
-        
         res.json({
             success: true,
             orderId: order.id,
@@ -432,10 +430,7 @@ app.post('/api/create-order', async (req, res) => {
         
     } catch (error) {
         console.error('Error creating order:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -447,7 +442,6 @@ app.post('/api/verify-payment', async (req, res) => {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
         
         if (razorpay_order_id && razorpay_order_id.startsWith('mock_order_')) {
-            console.log('Mock payment verified');
             return res.json({ success: true, message: 'Mock payment verified' });
         }
         
@@ -460,10 +454,8 @@ app.post('/api/verify-payment', async (req, res) => {
         const isAuthentic = expectedSignature === razorpay_signature;
         
         if (isAuthentic) {
-            console.log('✅ Payment verified successfully!');
             res.json({ success: true, message: 'Payment verified successfully' });
         } else {
-            console.log('❌ Payment verification failed!');
             res.status(400).json({ success: false, message: 'Payment verification failed' });
         }
         
@@ -473,37 +465,46 @@ app.post('/api/verify-payment', async (req, res) => {
     }
 });
 
-// ============ CONNECT TO MONGODB ============
+// ============ CONNECT TO MONGODB WITH RETRY LOGIC ============
 
-const startServer = async () => {
-    console.log('Attempting to connect to MongoDB...');
+const connectWithRetry = async (retryCount = 0, maxRetries = 5) => {
+    console.log(`Connection attempt ${retryCount + 1}/${maxRetries}...`);
     
     if (!process.env.MONGO_URI) {
         console.error('❌ MONGO_URI environment variable is not set!');
-        console.log('Available env vars:', Object.keys(process.env));
         process.exit(1);
     }
     
-    console.log('MONGO_URI starts with:', process.env.MONGO_URI.substring(0, 50) + '...');
-    
     try {
         await mongoose.connect(process.env.MONGO_URI, {
-            serverSelectionTimeoutMS: 5000,
+            serverSelectionTimeoutMS: 10000,
             socketTimeoutMS: 45000,
+            connectTimeoutMS: 10000,
         });
+        
         console.log('✅ MongoDB Connected Successfully!');
         console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
         
         const PORT = process.env.PORT || 5000;
         app.listen(PORT, '0.0.0.0', () => {
-            console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+            console.log(`\n🚀 Server running on port ${PORT}`);
             console.log(`📋 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`🔗 Health check: http://localhost:${PORT}/health`);
         });
+        
     } catch (err) {
-        console.error('❌ MongoDB Connection Error:', err.message);
-        console.error('Full error:', err);
-        process.exit(1);
+        console.error(`❌ MongoDB Connection Error (attempt ${retryCount + 1}):`, err.message);
+        
+        if (retryCount < maxRetries - 1) {
+            const waitTime = 5000;
+            console.log(`Waiting ${waitTime/1000} seconds before retry...`);
+            setTimeout(() => connectWithRetry(retryCount + 1, maxRetries), waitTime);
+        } else {
+            console.error('❌ Max retries reached. Exiting...');
+            process.exit(1);
+        }
     }
 };
 
-startServer();
+// Start the server with retry logic
+connectWithRetry();
